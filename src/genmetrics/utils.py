@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.special import softmax, log_softmax
 from scipy import linalg
 import torch
 from torch.utils.data import Dataset
@@ -9,45 +10,38 @@ from prdc import compute_prdc
 
 
 ## Defining the calculation functions ##
-def calculate_fid(real_features, fake_features):
+def calculate_fid(
+    real_features, fake_features, real_mu_sigma=(None, None), fake_mu_sigma=(None, None)
+):
     """Calculates the FID score between the real and fake features."""
 
-    ## Making the tensors in double precision ##
-    real_features = real_features.double().detach().cpu().numpy()
-    fake_features = fake_features.double().detach().cpu().numpy()
+    ## Calculating the mean and covariance of real image features ##
+    if real_mu_sigma != (None, None):
+        mean_real = real_mu_sigma[0].detach().cpu().numpy()
+        sigma_real = real_mu_sigma[1].detach().cpu().numpy()
 
-    ## Calculating the mean and covariance ##
-    mean_real = np.mean(real_features, axis=0)
-    mean_fake = np.mean(fake_features, axis=0)
+    else:
+        ## Making the tensors in double precision ##
+        real_features = real_features.double().detach().cpu().numpy()
+        mean_real = np.mean(real_features, axis=0)
+        sigma_real = np.cov(real_features, rowvar=False)
 
-    sigma_real = np.cov(real_features, rowvar=False)
-    sigma_fake = np.cov(fake_features, rowvar=False)
+    ## Calculating the mean and covariance of fake image features ##
+    if fake_mu_sigma != (None, None):
+        mean_fake = fake_mu_sigma[0].detach().cpu().numpy()
+        sigma_fake = fake_mu_sigma[1].detach().cpu().numpy()
+    else:
+        ## Making the tensors in double precision ##
+        fake_features = fake_features.double().detach().cpu().numpy()
+        mean_fake = np.mean(fake_features, axis=0)
+        sigma_fake = np.cov(fake_features, rowvar=False)
 
     ## Calculating the FID score ##
-    ## Code taken from https://github.com/openai/guided-diffusion/blob/main/evaluations/evaluator.py ##
-    mean_diff = mean_real - mean_fake
-    covmean, _ = linalg.sqrtm(sigma_real.dot(sigma_fake), disp=False)
+    m = np.square(mean_fake - mean_real).sum()
+    s, _ = linalg.sqrtm(sigma_fake.dot(sigma_real), disp=False)
+    value = float(np.real(m + np.trace(sigma_fake + sigma_real - 2 * s)))
 
-    if not np.isfinite(covmean).all():
-        offset = np.eye(sigma_real.shape[0]) * 1e-6
-        covmean = linalg.sqrtm((sigma_real + offset).dot(sigma_fake + offset))
-
-    if np.iscomplexobj(covmean):
-        if not np.allclose(np.diagonal(covmean).imag, 0, atol=1e-3):
-            m = np.max(np.abs(covmean.imag))
-            raise ValueError("Imaginary component {}".format(m))
-        covmean = covmean.real
-
-    tr_covmean = np.trace(covmean)
-
-    fid = (
-        mean_diff.dot(mean_diff)
-        + np.trace(sigma_real)
-        + np.trace(sigma_fake)
-        - 2 * tr_covmean
-    )
-
-    return fid
+    return value
 
 
 def calculate_is(logits, splits=10):
@@ -78,8 +72,6 @@ def calculate_is(logits, splits=10):
             conditional_prob_yx, log_conditional_prob_yx, log_marginal_prob_y
         )
     ]
-
-    print(len(kl))
 
     kl = torch.stack([k.sum(axis=1).mean().exp() for k in kl])
 
@@ -117,20 +109,27 @@ def calculate_prdc(real_features, fake_features, k, prdc_splits=5):
 class GenDataset(Dataset):
     """Implements the dataset."""
 
-    def __init__(self, path):
+    def __init__(self, image_path, caption_path=None):
         super().__init__()
+        self.mean = torch.tensor([False], dtype=torch.bool)
+        self.sigma = torch.tensor([False], dtype=torch.bool)
 
         ## Getting the data ##
-        if ".npz" in path:
-            with np.load(path) as file:
+        if ".npz" in image_path:
+            with np.load(image_path) as file:
                 self.images = torch.from_numpy(file["arr_0"]).permute(0, 3, 1, 2)
+                try:
+                    self.mean = torch.from_numpy(file["mu"])
+                    self.sigma = torch.from_numpy(file["sigma"])
+                except KeyError:
+                    pass
 
-        elif os.path.isdir(path):
+        elif os.path.isdir(image_path):
             self.images = [
                 torch.from_numpy(np.array(Image.open(file).convert("RGB"))).permute(
                     2, 0, 1
                 )
-                for file in sorted(glob(f"{path}/*.png"))
+                for file in sorted(glob(f"{image_path}/*.png"))
             ]
 
             self.images = torch.stack(self.images, dim=0)
@@ -138,8 +137,16 @@ class GenDataset(Dataset):
         else:
             raise ValueError("Invalid path.")
 
+        self.captions = None
+        if caption_path is not None:
+            assert ".txt" in caption_path, "Invalid caption path. Need a .txt file."
+            with open(caption_path, "r") as file:
+                self.captions = file.read().splitlines()
+
     def __getitem__(self, idx):
-        return self.images[idx]
+        if self.captions is not None:
+            return self.images[idx], self.captions[idx], self.mean, self.sigma
+        return self.images[idx], self.mean, self.sigma
 
     def __len__(self):
         return len(self.images)

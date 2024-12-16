@@ -92,11 +92,18 @@ class GenMetric(Metric):
         if "clip" in metrics:
             self.clip_score_metrics = CLIPScore("openai/clip-vit-large-patch14")
 
-    def update(self, images, real: bool = True, captions=None):
+    def update(
+        self,
+        images,
+        mean: torch.tensor = torch.tensor([False], dtype=torch.bool),
+        sigma: torch.tensor = torch.tensor([False], dtype=torch.bool),
+        real: bool = True,
+        captions=None,
+    ):
         """Updates the states of the metrics."""
 
         if "inception" in self.metrics:
-            self.inception_metrics.update(images, real=real)
+            self.inception_metrics.update(images, mean=mean, sigma=sigma, real=real)
 
         if "clip" in self.metrics:
             if real == False:
@@ -138,7 +145,7 @@ class InceptionMetric(Metric):
         features,
         which_scores: list,
         is_score_splits: int = 10,
-        k: int = 1,
+        k: int = 3,
         prdc_splits: int = 5,
         **kwargs,
     ):
@@ -169,9 +176,16 @@ class InceptionMetric(Metric):
             self.add_state(f"real_features_{feature}", default=[], dist_reduce_fx="cat")
             self.add_state(f"fake_features_{feature}", default=[], dist_reduce_fx="cat")
             self.add_state(f"fake_logits_{feature}", default=[], dist_reduce_fx="cat")
+            # if "incpetion" in feature:
+            self.__setattr__(f"real_mean_{feature}", None)
+            self.__setattr__(f"real_sigma_{feature}", None)
+            self.__setattr__(f"fake_mean_{feature}", None)
+            self.__setattr__(f"fake_sigma_{feature}", None)
 
     # def update(self,)
-    def update(self, images, real: bool = True):
+    def update(
+        self, images, mean: torch.Tensor, sigma: torch.Tensor, real: bool = True
+    ):
         """Updates the states of the metrics."""
 
         ## Setting the prefix ##
@@ -179,6 +193,17 @@ class InceptionMetric(Metric):
 
         # ## Extracting the features ##
         for name in self.feature_extractor_names:
+            if "inception" in name:
+                ## Setting the mean and sigma ##
+                self.__setattr__(
+                    f"{prefix}_mean_{name}",
+                    mean[0] if mean.dtype != torch.bool else None,
+                )
+                self.__setattr__(
+                    f"{prefix}_sigma_{name}",
+                    sigma[0] if mean.dtype != torch.bool else None,
+                )
+
             preds = self.feature_extractors[name](images)
 
             if isinstance(preds, tuple):
@@ -200,7 +225,18 @@ class InceptionMetric(Metric):
 
             if "fid" in self.which_scores:
                 print(f"Calculating FID for {name}...", end="")
-                eval_scores[f"fid_{name}"] = calculate_fid(real_features, fake_features)
+                eval_scores[f"fid_{name}"] = calculate_fid(
+                    real_features,
+                    fake_features,
+                    real_mu_sigma=(
+                        self.__getattribute__(f"real_mean_{name}"),
+                        self.__getattribute__(f"real_sigma_{name}"),
+                    ),
+                    fake_mu_sigma=(
+                        self.__getattribute__(f"fake_mean_{name}"),
+                        self.__getattribute__(f"fake_sigma_{name}"),
+                    ),
+                )
                 print("Done!")
 
             if "is" in self.which_scores and "inception" in name:
@@ -227,6 +263,3 @@ class InceptionMetric(Metric):
                 print("Done!")
 
         return eval_scores
-
-if __name__ == "__main__":
-    a = GenMetric()

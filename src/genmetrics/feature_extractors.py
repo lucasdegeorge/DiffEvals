@@ -27,7 +27,7 @@ class NoTrainInceptionV3(FeatureExtractorInceptionV3):
     def forward(self, x: Tensor) -> Tensor:
         out = super().forward(x)
         return out
-    
+
 class CLIPFeatureExtractor(torch.nn.Module):
     def __init__(self, path="openai/clip-vit-large-patch14"):
         super().__init__()
