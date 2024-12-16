@@ -6,7 +6,7 @@ Install the package from repository.
 
 `pip install git+https://github.com/lucasdegeorge/DiffEvals.git`
 
-```{python}
+```python
 from genmetrics import GenMetric
 
 ## Setting up Genmetrics to calculate clip score and all of inception metrics. ... #
