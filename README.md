@@ -34,7 +34,7 @@ fake_loader = torch.utils.data.DataLoader(
 
 ## Looping over the real loader and fake loader separately. This is done ... #
 # ... as the real dataset and fake dataset might have different number of ... #
-# ... samples. In case you have same samples, please use one loop for both. ##
+# ... samples. In case you have same number of samples, please use one loop for both. ##
 for real_images in tqdm(real_loader, total=len(real_loader)):
     gen_metrics.update(real_images.to("cuda"), real=True)
 
