@@ -90,7 +90,7 @@ for fake_images, captions, fake_mean, fake_sigma in tqdm(fake_loader, total=len(
         mean=fake_mean.to("cuda"), 
         sigma=fake_sigma.to("cuda"), 
         real=False, 
-        captions=captions
+        captions=list(captions)
     )
 
 eval_scores = gen_metrics.compute()
