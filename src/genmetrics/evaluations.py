@@ -207,12 +207,12 @@ class InceptionMetric(Metric):
             preds = self.feature_extractors[name](images)
 
             if isinstance(preds, tuple):
-                self.__getattribute__(f"{prefix}_features_{name}").append(preds[0])
+                self.__getattribute__(f"{prefix}_features_{name}").append(preds[0].detach().cpu())
 
                 if real == False:
-                    self.__getattribute__(f"{prefix}_logits_{name}").append(preds[1])
+                    self.__getattribute__(f"{prefix}_logits_{name}").append(preds[1].detach().cpu())
             else:
-                self.__getattribute__(f"{prefix}_features_{name}").append(preds)
+                self.__getattribute__(f"{prefix}_features_{name}").append(preds.detach().cpu())
 
     def compute(self):
         """Computes the evaluation metrics."""
