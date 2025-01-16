@@ -9,11 +9,11 @@ Install the package from repository.
 ```python
 from genmetrics import GenMetric
 
-## Setting up Genmetrics to calculate clip score and all of inception metrics. ... #
-# ... These include FID, IS, PRDC. There is also an opportunity to use different ... #
-# ... feature extractors for inception metrics calculation. ##
+## Setting up Genmetrics to calculate clip score, clip score with jina backbone ... #
+# and all of inception metrics. These include FID, IS, PRDC. There is also an ... #
+# opportunity to use different feature extractors for inception metrics calculation. ##
 gen_metrics = GenMetric(
-    metrics=["clip", "inception"],
+    metrics=["inception", "clip", "jina_clip"],
     feature_extractors_for_inception_metrics=["inceptionv3", "clip", "dinov2"],
 )
 gen_metrics = gen_metrics.to("cuda")
@@ -96,5 +96,8 @@ for fake_images, captions, fake_mean, fake_sigma in tqdm(fake_loader, total=len(
 eval_scores = gen_metrics.compute()
 
 print(eval_scores)
-```
 
+## One could also just use the InceptionMetric and CLIPJinaScore separately ##
+from genmetrics import InceptionMetric, CLIPJinaScore
+## Check the classes in src.genmetrics.evaluations for more information ##
+```

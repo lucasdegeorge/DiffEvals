@@ -8,6 +8,7 @@ Majorly, this file implements the following evaluation metrics:
     5. Density
     6. Coverage
     7. ClipScore
+    8. JinaClipScore
 """
 
 import torch
@@ -15,6 +16,7 @@ import torch.nn as nn
 from torchmetrics import Metric
 from torchmetrics.utilities import dim_zero_cat
 from torchmetrics.multimodal.clip_score import CLIPScore
+from torchvision import transforms
 from tqdm import tqdm
 from typing import List
 
@@ -22,6 +24,7 @@ from .utils import (
     calculate_fid,
     calculate_is,
     calculate_prdc,
+    GenDataset,
 )
 
 from .feature_extractors import (
@@ -36,7 +39,7 @@ class GenMetric(Metric):
 
     def __init__(
         self,
-        metrics: List[str] = ["inception", "clip"],
+        metrics: List[str] = ["inception", "clip", "jina_clip"],
         feature_extractors_for_inception_metrics: List[str] = [
             "inceptionv3",
             "clip",
@@ -53,8 +56,8 @@ class GenMetric(Metric):
 
         ## Checking the validity of the metrics ##
         assert all(
-            metric in ["inception", "clip"] for metric in metrics
-        ), "Sorry, as of now only inception and clip is supported!"
+            metric in ["inception", "clip", "jina_clip"] for metric in metrics
+        ), "Sorry, as of now only inception, clip and jina_clip are supported!"
 
         if "inception" in metrics:
             assert (
@@ -92,6 +95,9 @@ class GenMetric(Metric):
         if "clip" in metrics:
             self.clip_score_metrics = CLIPScore("openai/clip-vit-large-patch14")
 
+        if "jina_clip" in metrics:
+            self.jina_clip_score_metrics = CLIPJinaScore()
+
     def update(
         self,
         images,
@@ -110,6 +116,13 @@ class GenMetric(Metric):
                 assert captions is not None, "Captions must be provided for CLIPScore."
                 self.clip_score_metrics.update(images, captions)
 
+        if "jina_clip" in self.metrics:
+            if real == False:
+                assert (
+                    captions is not None
+                ), "Captions must be provided for JinaCLIPScore."
+                self.jina_clip_score_metrics.update(images, captions)
+
     def compute(self):
         """Computes the evaluation metrics."""
         eval_scores = {}
@@ -124,6 +137,12 @@ class GenMetric(Metric):
             eval_scores["clip_score"] = self.clip_score_metrics.compute().item()
             print("Done!")
 
+        if "jina_clip" in self.metrics:
+            print("Computing the Jina-CLIP score...", end="")
+            eval_scores["jina_clip_score"] = (
+                self.jina_clip_score_metrics.compute().item()
+            )
+            print("Done!")
         return eval_scores
 
 
@@ -207,12 +226,18 @@ class InceptionMetric(Metric):
             preds = self.feature_extractors[name](images)
 
             if isinstance(preds, tuple):
-                self.__getattribute__(f"{prefix}_features_{name}").append(preds[0].detach().cpu())
+                self.__getattribute__(f"{prefix}_features_{name}").append(
+                    preds[0].detach().cpu()
+                )
 
                 if real == False:
-                    self.__getattribute__(f"{prefix}_logits_{name}").append(preds[1].detach().cpu())
+                    self.__getattribute__(f"{prefix}_logits_{name}").append(
+                        preds[1].detach().cpu()
+                    )
             else:
-                self.__getattribute__(f"{prefix}_features_{name}").append(preds.detach().cpu())
+                self.__getattribute__(f"{prefix}_features_{name}").append(
+                    preds.detach().cpu()
+                )
 
     def compute(self):
         """Computes the evaluation metrics."""
@@ -263,3 +288,64 @@ class InceptionMetric(Metric):
                 print("Done!")
 
         return eval_scores
+
+
+class CLIPJinaScore(Metric):
+    """Implements the CLIPScore using the Jina-CLIP-v2 model."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.model, self.processor = self._get_jina_model_and_processor()
+        self.add_state("score", torch.tensor(0.0), dist_reduce_fx="sum")
+        self.add_state(
+            "n_samples", torch.tensor(0, dtype=torch.long), dist_reduce_fx="sum"
+        )
+
+    def update(self, images, text):
+        """Update score on a batch of images and text."""
+        score, n_samples = self._score_update(images, text, self.model, self.processor)
+        self.score += score.sum(0)
+        self.n_samples += n_samples
+
+    def compute(self):
+        """Compute accumulated score."""
+        return torch.max(self.score / self.n_samples, torch.zeros_like(self.score))
+
+    def _get_jina_model_and_processor(self):
+        """Returns the Jina-CLIP-v2 model and processor."""
+        from transformers import AutoModel, AutoProcessor
+
+        model = AutoModel.from_pretrained("jinaai/jina-clip-v2", trust_remote_code=True)
+
+        processor = AutoProcessor.from_pretrained(
+            "jinaai/jina-clip-v2", trust_remote_code=True
+        )
+
+        return model, processor
+
+    def _score_update(self, images, text, model, processor):
+        """Update score on a batch of images and text."""
+
+        device = images[0].device
+
+        processed_input = processor(
+            text=text,
+            images=[transforms.functional.to_pil_image(i.cpu()) for i in images],
+            return_tensors="pt",
+            padding=True,
+        )
+
+        img_features = model.get_image_features(
+            processed_input["pixel_values"].to(device)
+        )
+        img_features = img_features / img_features.norm(p=2, dim=-1, keepdim=True)
+
+        txt_features = model.get_text_features(
+            processed_input["input_ids"].to(device),
+            processed_input["attention_mask"].to(device),
+        )
+        txt_features = txt_features / txt_features.norm(p=2, dim=-1, keepdim=True)
+
+        # cosine similarity between feature vectors
+        score = 100 * (img_features * txt_features).sum(axis=-1)
+        return score, len(text)

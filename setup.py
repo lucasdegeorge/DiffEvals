@@ -16,6 +16,7 @@ setup(
         "torch-fidelity",
         "scipy",
         "prdc",
+        "timm",
     ],
     url="https://github.com/lucasdegeorge/DiffEvals",
     author="Lucas Degeorge, Arijit Ghosh",
