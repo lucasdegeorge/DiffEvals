@@ -1,10 +1,14 @@
 # DiffEvals
 
-## How to use
+## Installation
 
 Install the package from repository.
 
 `pip install git+https://github.com/lucasdegeorge/DiffEvals.git`
+
+The dependencies will be automatically installed.
+
+## Usage
 
 ```python
 from genmetrics import GenMetric
@@ -46,6 +50,7 @@ eval_scores = gen_metrics.compute()
 
 print(eval_scores)
 ```
+
 
 One could also use the in-built `GenDataset` to create the dataset and calculate scores.
 
@@ -97,7 +102,11 @@ eval_scores = gen_metrics.compute()
 
 print(eval_scores)
 
-## One could also just use the InceptionMetric and CLIPJinaScore separately ##
-from genmetrics import InceptionMetric, CLIPJinaScore
-## Check the classes in src.genmetrics.evaluations for more information ##
 ```
+
+
+One could also just use the `InceptionMetric` and `CLIPJinaScore` separately by doing the following.
+```python
+from genmetrics import InceptionMetric, CLIPJinaScore
+```
+Check the classes in `src.genmetrics.evaluations` for more information.
