@@ -19,6 +19,9 @@ from torchmetrics.multimodal.clip_score import CLIPScore
 from torchvision import transforms
 from tqdm import tqdm
 from typing import List
+from os.path import expanduser
+from urllib.request import urlretrieve
+import os
 
 from .utils import (
     calculate_fid,
@@ -39,7 +42,14 @@ class GenMetric(Metric):
 
     def __init__(
         self,
-        metrics: List[str] = ["inception", "clip", "jina_clip"],
+        metrics: List[str] = [
+            "inception",
+            "clip",
+            "jina_clip",
+            "pickscore",
+            "aesthetic_score",
+            "hpsv2_score",
+        ],
         feature_extractors_for_inception_metrics: List[str] = [
             "inceptionv3",
             "clip",
@@ -56,8 +66,17 @@ class GenMetric(Metric):
 
         ## Checking the validity of the metrics ##
         assert all(
-            metric in ["inception", "clip", "jina_clip"] for metric in metrics
-        ), "Sorry, as of now only inception, clip and jina_clip are supported!"
+            metric
+            in [
+                "inception",
+                "clip",
+                "jina_clip",
+                "pickscore",
+                "aesthetic_score",
+                "hpsv2_score",
+            ]
+            for metric in metrics
+        ), f"Sorry, one of the requested metric is not implemented!"
 
         if "inception" in metrics:
             assert (
@@ -98,6 +117,18 @@ class GenMetric(Metric):
         if "jina_clip" in metrics:
             self.jina_clip_score_metrics = CLIPJinaScore()
 
+        ## 3. PickScore ##
+        if "pickscore" in metrics:
+            self.pick_score_metrics = PickScore()
+
+        ## 4. Aesthetic Score ##
+        if "aesthetic_score" in metrics:
+            self.aesthetic_score_metrics = AestheticScore()
+
+        ## 5. HPSv2 Score ##
+        if "hpsv2_score" in metrics:
+            self.hpsv2_score_metrics = HPSv2Score()
+
     def update(
         self,
         images,
@@ -123,6 +154,20 @@ class GenMetric(Metric):
                 ), "Captions must be provided for JinaCLIPScore."
                 self.jina_clip_score_metrics.update(images, captions)
 
+        if "pickscore" in self.metrics:
+            if real == False:
+                assert captions is not None, "Captions must be provided for PickScore."
+                self.pick_score_metrics.update(images, captions)
+
+        if "aesthetic_score" in self.metrics:
+            if real == False:
+                self.aesthetic_score_metrics.update(images)
+
+        if "hpsv2_score" in self.metrics:
+            if real == False:
+                assert captions is not None, "Captions must be provided for HPSv2Score."
+                self.hpsv2_score_metrics.update(images, captions)
+
     def compute(self):
         """Computes the evaluation metrics."""
         eval_scores = {}
@@ -143,6 +188,24 @@ class GenMetric(Metric):
                 self.jina_clip_score_metrics.compute().item()
             )
             print("Done!")
+
+        if "pickscore" in self.metrics:
+            print("Computing the PickScore...", end="")
+            eval_scores["pick_score"] = self.pick_score_metrics.compute().item()
+            print("Done!")
+
+        if "aesthetic_score" in self.metrics:
+            print("Computing the Aesthetic Score...", end="")
+            eval_scores["aesthetic_score"] = (
+                self.aesthetic_score_metrics.compute().item()
+            )
+            print("Done!")
+
+        if "hpsv2_score" in self.metrics:
+            print("Computing the HPSv2 Score...", end="")
+            eval_scores["hpsv2_score"] = self.hpsv2_score_metrics.compute().item()
+            print("Done!")
+            
         return eval_scores
 
 
@@ -349,3 +412,227 @@ class CLIPJinaScore(Metric):
         # cosine similarity between feature vectors
         score = 100 * (img_features * txt_features).sum(axis=-1)
         return score, len(text)
+
+
+class PickScore(Metric):
+    """Implements the Pickscore using laion clip model."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.model, self.processor = self._get_pickscore_model_and_processor()
+        self.add_state("score", torch.tensor(0.0), dist_reduce_fx="sum")
+        self.add_state(
+            "n_samples", torch.tensor(0, dtype=torch.long), dist_reduce_fx="sum"
+        )
+
+    def update(self, images, text):
+        """Update score on a batch of images and text."""
+        score, n_samples = self._score_update(images, text, self.model, self.processor)
+        self.score += score.sum(0)
+        self.n_samples += n_samples
+
+    def compute(self):
+        """Compute accumulated score."""
+        return self.score / self.n_samples
+
+    def _get_pickscore_model_and_processor(self):
+        """Returns the pickscore model and processor."""
+        from transformers import AutoModel, AutoProcessor
+
+        model = AutoModel.from_pretrained(
+            "yuvalkirstain/PickScore_v1", trust_remote_code=True
+        )
+
+        processor = AutoProcessor.from_pretrained(
+            "laion/CLIP-ViT-H-14-laion2B-s32B-b79K", trust_remote_code=True
+        )
+
+        return model.eval(), processor
+
+    def _score_update(self, images, text, model, processor):
+        """Update score on a batch of images and text."""
+
+        device = images[0].device
+
+        processed_input = processor(
+            text=text,
+            images=[transforms.functional.to_pil_image(i.cpu()) for i in images],
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=77,
+        )
+
+        img_features = model.get_image_features(
+            processed_input["pixel_values"].to(device)
+        )
+        img_features = img_features / img_features.norm(p=2, dim=-1, keepdim=True)
+
+        txt_features = model.get_text_features(
+            processed_input["input_ids"].to(device),
+            processed_input["attention_mask"].to(device),
+        )
+        txt_features = txt_features / txt_features.norm(p=2, dim=-1, keepdim=True)
+
+        # cosine similarity between feature vectors
+        score = model.logit_scale.exp() * (txt_features @ img_features.T)[0]
+        return score, len(text)
+
+
+class AestheticScore(Metric):
+    """Implements the Aesthetics score using clip model."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.aesthetic_predictor, self.feature_extractor, self.preprocess = (
+            self._get_aesthetic_score_models_and_processor()
+        )
+        self.add_state("score", torch.tensor(0.0), dist_reduce_fx="sum")
+        self.add_state(
+            "n_samples", torch.tensor(0, dtype=torch.long), dist_reduce_fx="sum"
+        )
+
+    def update(self, images):
+        """Update score on a batch of images and text."""
+        score, n_samples = self._score_update(
+            images, self.aesthetic_predictor, self.feature_extractor, self.preprocess
+        )
+        self.score += score.sum()
+        self.n_samples += n_samples
+
+    def compute(self):
+        """Compute accumulated score."""
+        return self.score / self.n_samples
+
+    def _get_aesthetic_score_models_and_processor(self):
+        """Returns the aesthetic models and processor."""
+        import open_clip
+
+        ## 1. We will load the aesthetic prediction head ##
+        home = expanduser("~")
+        cache_folder = home + "/.cache/emb_reader"
+        path_to_model = cache_folder + "/sa_0_4_vit_l_14_linear.pth"
+        if not os.path.exists(path_to_model):
+            os.makedirs(cache_folder, exist_ok=True)
+            url_model = "https://github.com/LAION-AI/aesthetic-predictor/blob/main/sa_0_4_vit_l_14_linear.pth?raw=true"
+            urlretrieve(url_model, path_to_model)
+        aesthetic_predictor = nn.Linear(768, 1)
+        aesthetic_predictor.load_state_dict(torch.load(path_to_model))
+        aesthetic_predictor.eval()
+
+        ## 2. Then the clip model and the processor ##
+        feature_extractor, _, preprocess = open_clip.create_model_and_transforms(
+            "ViT-L-14", pretrained="openai"
+        )
+
+        return aesthetic_predictor.eval(), feature_extractor.eval(), preprocess
+
+    def _score_update(self, images, aesthetic_predictor, feature_extractor, preprocess):
+        """Update score on a batch of images."""
+
+        device = images[0].device
+
+        images = torch.cat(
+            [
+                preprocess(transforms.functional.to_pil_image(i.cpu()))
+                .unsqueeze(0)
+                .to(device)
+                for i in images
+            ],
+            dim=0,
+        )
+
+        image_features = feature_extractor.encode_image(images)
+        image_features /= image_features.norm(dim=-1, keepdim=True)
+        predictions = aesthetic_predictor(image_features)
+
+        score = predictions.detach().cpu()
+        return score, len(predictions)
+
+
+class HPSv2Score(Metric):
+    """Implements the Aesthetics score using clip model."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.model, self.preprocess, self.tokenizer = (
+            self._get_hpsv2score_models_and_processor()
+        )
+        self.add_state("score", torch.tensor(0.0), dist_reduce_fx="sum")
+        self.add_state(
+            "n_samples", torch.tensor(0, dtype=torch.long), dist_reduce_fx="sum"
+        )
+
+    def update(self, images, texts):
+        """Update score on a batch of images and text."""
+        score, n_samples = self._score_update(
+            images, texts, self.model, self.preprocess, self.tokenizer
+        )
+        self.score += score.sum()
+        self.n_samples += n_samples
+
+    def compute(self):
+        """Compute accumulated score."""
+        return self.score / self.n_samples
+
+    def _get_hpsv2score_models_and_processor(self):
+        """Returns the hpsv2 models and processor."""
+        import huggingface_hub
+        from hpsv2.src.open_clip import create_model_and_transforms, get_tokenizer
+        from hpsv2.utils import root_path, hps_version_map
+
+        model, _, preprocess = create_model_and_transforms(
+            "ViT-H-14",
+            "laion2B-s32B-b79K",
+            precision="amp",
+            device=self.device,
+            jit=False,
+            force_quick_gelu=False,
+            force_custom_text=False,
+            force_patch_dropout=False,
+            force_image_size=None,
+            pretrained_image=False,
+            image_mean=None,
+            image_std=None,
+            light_augmentation=True,
+            aug_cfg={},
+            output_dict=True,
+            with_score_predictor=False,
+            with_region_predictor=False,
+        )
+
+        cp = huggingface_hub.hf_hub_download("xswu/HPSv2", hps_version_map["v2.1"])
+        checkpoint = torch.load(cp, map_location=self.device)
+        model.load_state_dict(checkpoint["state_dict"])
+        tokenizer = get_tokenizer("ViT-H-14")
+
+        return model.eval(), preprocess, tokenizer
+
+    def _score_update(self, images, texts, model, preprocess, tokenizer):
+        """Update score on a batch of images."""
+
+        device = images[0].device
+
+        images = torch.cat(
+            [
+                preprocess(transforms.functional.to_pil_image(i.cpu()))
+                .unsqueeze(0)
+                .to(device)
+                for i in images
+            ],
+            dim=0,
+        )
+
+        texts = tokenizer(texts).to(device)
+
+        with torch.amp.autocast(
+            device_type="cuda",
+        ):
+            outputs = model(images, texts)
+            image_features, text_features = (
+                outputs["image_features"],
+                outputs["text_features"],
+            )
+            logits_per_image = image_features @ text_features.T
+            score = torch.diagonal(logits_per_image).detach().cpu()[0]
+        return score, len(texts)
