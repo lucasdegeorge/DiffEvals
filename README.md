@@ -1,5 +1,11 @@
 # DiffEvals
 
+## TODO
+[x] Implement HPSv2, PickScore, Aesthetic Score.
+[ ] Implement Image-reward.
+[ ] Fix the installation procedure.
+[ ] Implement GenEval.
+
 ## Installation
 
 Install the package from repository.
