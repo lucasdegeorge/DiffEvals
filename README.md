@@ -2,9 +2,10 @@
 
 ## TODO
 [x] Implement HPSv2, PickScore, Aesthetic Score.
-[ ] Implement Image-reward.
-[ ] Fix the installation procedure.
+[x] Implement Image-reward.
+[x] Fix the installation procedure.
 [ ] Implement GenEval.
+[ ] Cleanup with separate files for aesthetic scores.
 
 ## Installation
 

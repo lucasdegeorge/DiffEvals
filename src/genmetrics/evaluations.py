@@ -9,6 +9,10 @@ Majorly, this file implements the following evaluation metrics:
     6. Coverage
     7. ClipScore
     8. JinaClipScore
+    9. PickScore
+    10. Aesthetic Score
+    11. HPSv2 Score
+    12. ImageReward Score
 """
 
 import torch
@@ -49,6 +53,7 @@ class GenMetric(Metric):
             "pickscore",
             "aesthetic_score",
             "hpsv2_score",
+            "image_reward_score",
         ],
         feature_extractors_for_inception_metrics: List[str] = [
             "inceptionv3",
@@ -74,6 +79,7 @@ class GenMetric(Metric):
                 "pickscore",
                 "aesthetic_score",
                 "hpsv2_score",
+                "image_reward_score",
             ]
             for metric in metrics
         ), f"Sorry, one of the requested metric is not implemented!"
@@ -129,6 +135,10 @@ class GenMetric(Metric):
         if "hpsv2_score" in metrics:
             self.hpsv2_score_metrics = HPSv2Score()
 
+        ## 6. ImageReward Score ##
+        if "image_reward_score" in metrics:
+            self.image_reward_score_metrics = ImageRewardScore()
+
     def update(
         self,
         images,
@@ -168,6 +178,11 @@ class GenMetric(Metric):
                 assert captions is not None, "Captions must be provided for HPSv2Score."
                 self.hpsv2_score_metrics.update(images, captions)
 
+        if "image_reward_score" in self.metrics:
+            if real == False:
+                assert captions is not None, "Captions must be provided for ImageRewardScore."
+                self.image_reward_score_metrics.update(images, captions)
+
     def compute(self):
         """Computes the evaluation metrics."""
         eval_scores = {}
@@ -205,7 +220,14 @@ class GenMetric(Metric):
             print("Computing the HPSv2 Score...", end="")
             eval_scores["hpsv2_score"] = self.hpsv2_score_metrics.compute().item()
             print("Done!")
-            
+
+        if "image_reward_score" in self.metrics:
+            print("Computing the ImageReward Score...", end="")
+            eval_scores["image_reward_score"] = (
+                self.image_reward_score_metrics.compute().item()
+            )
+            print("Done!")
+
         return eval_scores
 
 
@@ -636,3 +658,84 @@ class HPSv2Score(Metric):
             logits_per_image = image_features @ text_features.T
             score = torch.diagonal(logits_per_image).detach().cpu()[0]
         return score, len(texts)
+
+
+class ImageRewardScore(Metric):
+    """Implements the Imagereward score."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.model, self.preprocess, self.mlp, self.mean, self.std = (
+            self._get_image_reward_score_model()
+        )
+        self.add_state("score", torch.tensor(0.0), dist_reduce_fx="sum")
+        self.add_state(
+            "n_samples", torch.tensor(0, dtype=torch.long), dist_reduce_fx="sum"
+        )
+
+    def update(self, images, texts):
+        """Update score on a batch of images and text."""
+        score, n_samples = self._score_update(images, texts, self.model)
+        self.score += score.sum()
+        self.n_samples += n_samples
+
+    def compute(self):
+        """Compute accumulated score."""
+        return self.score / self.n_samples
+
+    def _get_image_reward_score_model(self):
+        """Returns the image reward models."""
+        import ImageReward as RM
+
+        base = RM.load("ImageReward-v1.0")
+
+        return base.blip.eval(), base.preprocess, base.mlp, base.mean, base.std
+
+    def _score_update(self, images, texts, model):
+        """Update score on a batch of images."""
+
+        device = images[0].device
+
+        images = torch.cat(
+            [
+                self.preprocess(transforms.functional.to_pil_image(i.cpu()))
+                .unsqueeze(0)
+                .to(device)
+                for i in images
+            ],
+            dim=0,
+        )
+
+        with torch.amp.autocast(device_type="cuda"):
+            # text encode
+            text_input = model.tokenizer(
+                texts,
+                padding="max_length",
+                truncation=True,
+                max_length=35,
+                return_tensors="pt",
+            ).to(device)
+
+            # image encode
+            image_embeds = model.visual_encoder(images)
+
+            # text encode cross attention with image
+            image_atts = torch.ones(image_embeds.size()[:-1], dtype=torch.long).to(
+                device
+            )
+            text_output = model.text_encoder(
+                text_input.input_ids,
+                attention_mask=text_input.attention_mask,
+                encoder_hidden_states=image_embeds,
+                encoder_attention_mask=image_atts,
+                return_dict=True,
+            )
+
+            txt_features = text_output.last_hidden_state[
+                :, 0, :
+            ].float()  # (feature_dim)
+            score = self.mlp(txt_features)
+            score = (score - self.mean) / self.std
+
+        return score.detach().cpu(), len(texts)
+    
