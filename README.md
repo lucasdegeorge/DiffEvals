@@ -15,6 +15,8 @@ Install the package from repository.
 
 The dependencies will be automatically installed.
 
+One other alternative (and the recommended one) is to use `uv` for installation. Its super fast. For doing that you can already use `uv add git+https://github.com/lucasdegeorge/DiffEvals.git`. You could also just `git clone https://github.com/lucasdegeorge/DiffEvals.git` and then do `uv sync` to have everything installed super fast.
+
 ## Usage
 
 ```python
@@ -117,3 +119,5 @@ One could also just use the `InceptionMetric` and `CLIPJinaScore` separately by 
 from genmetrics import InceptionMetric, CLIPJinaScore
 ```
 Check the classes in `src.genmetrics.evaluations` for more information.
+
+Additionally we also have the opportunity to calculate aesthetics metrics like `PickScore`, `AestheticScore`, `HPSv2` and `ImageReward`. The use case is quite similar as before but to calculate these you dont need to have a real dataset and hence the code can be readily simplified by just using one dataloader.

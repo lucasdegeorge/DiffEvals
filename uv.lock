@@ -140,6 +140,32 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/3d/b4/41ecb1516f1ba728f39ee7062b9dac1352d39823f513bb6f9e8aeb86e26d/clint-0.5.1.tar.gz", hash = "sha256:05224c32b1075563d0b16d0015faaf9da43aa214e4a2140e51f08789e7a4c5aa", size = 29355, upload-time = "2015-08-25T16:11:19.237Z" }
 
 [[package]]
+name = "clip"
+version = "1.0"
+source = { url = "https://github.com/openai/CLIP/archive/refs/heads/main.zip" }
+dependencies = [
+    { name = "ftfy" },
+    { name = "packaging" },
+    { name = "regex" },
+    { name = "torch" },
+    { name = "torchvision" },
+    { name = "tqdm" },
+]
+sdist = { hash = "sha256:11c3593912e6e6446fb0bde144c5ea374f7e19eeab9072c3eb00b59dd8afb706" }
+
+[package.metadata]
+requires-dist = [
+    { name = "ftfy" },
+    { name = "packaging" },
+    { name = "pytest", marker = "extra == 'dev'" },
+    { name = "regex" },
+    { name = "torch" },
+    { name = "torchvision" },
+    { name = "tqdm" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -197,12 +223,12 @@ dependencies = [
 requires-dist = [
     { name = "hpsv2", git = "https://github.com/tgxs002/HPSv2.git" },
     { name = "huggingface-hub", specifier = ">=0.34.2" },
-    { name = "image-reward", specifier = ">=1.5" },
+    { name = "image-reward", git = "https://github.com/zai-org/ImageReward.git" },
     { name = "numpy", specifier = ">=2.3.2" },
     { name = "open-clip-torch", specifier = ">=2.32.0" },
     { name = "prdc", specifier = ">=0.2" },
     { name = "scipy", specifier = ">=1.16.1" },
-    { name = "timm", specifier = ">=0.6.13" },
+    { name = "timm", specifier = "==1.0.13" },
     { name = "torch", specifier = ">=2.7.1" },
     { name = "torchaudio", specifier = ">=2.7.1" },
     { name = "torchmetrics", extras = ["image"], specifier = ">=1.8.0" },
@@ -409,19 +435,16 @@ wheels = [
 [[package]]
 name = "image-reward"
 version = "1.5"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/zai-org/ImageReward.git#c1392c6dd0fd6ecd6d416c96959ab744a6d0a8fb" }
 dependencies = [
     { name = "accelerate" },
+    { name = "clip" },
     { name = "datasets" },
     { name = "diffusers" },
     { name = "fairscale" },
     { name = "huggingface-hub" },
     { name = "timm" },
     { name = "transformers" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/cd/e5/e996b2815451b56104cb5bb202b314e93d7774fb3ddba894f09ce88d7578/image-reward-1.5.tar.gz", hash = "sha256:e5765aeeba56cd37bee486a645b46c1687176e7ff6876b72b9a3324b34c030aa", size = 37698, upload-time = "2023-07-11T06:07:38.59Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ea/df/b2e66a6f93494ac43d2cfb77475e0321e062b765ec35a368a07decf22a1d/image_reward-1.5-py3-none-any.whl", hash = "sha256:b4917a680c3caa68a1ce3847cebab3ae6d5b4c409d7f8804f537b9d42662cf12", size = 42320, upload-time = "2023-07-11T06:07:36.331Z" },
 ]
 
 [[package]]
@@ -1237,17 +1260,18 @@ wheels = [
 
 [[package]]
 name = "timm"
-version = "0.6.13"
+version = "1.0.13"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
     { name = "pyyaml" },
+    { name = "safetensors" },
     { name = "torch" },
     { name = "torchvision" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/de/29/4f9b0732a7eb5bd39e5873e52d648d6240b64997dbbaf09cf0996be1bf9c/timm-0.6.13.tar.gz", hash = "sha256:745c54f7b7985a18e08bd66c997b018c1c3fef99bbb8c018879a6f85571782f5", size = 459170, upload-time = "2023-03-24T00:57:44.831Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9b/7c/1a6f3ddd6153679dd95c6b235e5f3f3c9f8ff881c7326cdc32e95d3ceb48/timm-1.0.13.tar.gz", hash = "sha256:39190337cff26a15d180b660374c901ac472b69d91d8cfc5a5bb47c600fb3716", size = 2224269, upload-time = "2025-01-09T18:46:56.812Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f6/c6/806d9b2fa95f418ad700dd206a935d5e8d7355505589dd13a70eb3a45048/timm-0.6.13-py3-none-any.whl", hash = "sha256:ea5aed42f94062a80da414e6f1791cb82012fdb54f7db72c607637914a521345", size = 549137, upload-time = "2023-03-24T00:57:42.273Z" },
+    { url = "https://files.pythonhosted.org/packages/2e/b2/36c75bb018623661d2156d78a90fec9e22332748646686043b74f4fb5924/timm-1.0.13-py3-none-any.whl", hash = "sha256:5f1dd811c7b1ebc2a6f3874f3cb49c6f26de1a42b9f76debe0414b9740f83669", size = 2354834, upload-time = "2025-01-09T18:46:53.151Z" },
 ]
 
 [[package]]

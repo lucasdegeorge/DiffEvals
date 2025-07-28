@@ -496,8 +496,8 @@ class PickScore(Metric):
         )
         txt_features = txt_features / txt_features.norm(p=2, dim=-1, keepdim=True)
 
-        # cosine similarity between feature vectors
-        score = model.logit_scale.exp() * (txt_features @ img_features.T)[0]
+        score = model.logit_scale.exp() * torch.diag(txt_features @ img_features.T)
+        
         return score, len(text)
 
 
@@ -647,16 +647,14 @@ class HPSv2Score(Metric):
 
         texts = tokenizer(texts).to(device)
 
-        with torch.amp.autocast(
-            device_type="cuda",
-        ):
-            outputs = model(images, texts)
-            image_features, text_features = (
-                outputs["image_features"],
-                outputs["text_features"],
-            )
-            logits_per_image = image_features @ text_features.T
-            score = torch.diagonal(logits_per_image).detach().cpu()[0]
+        outputs = model(images, texts)
+        image_features, text_features = (
+            outputs["image_features"],
+            outputs["text_features"],
+        )
+        logits_per_image = image_features @ text_features.T
+        score = torch.diag(logits_per_image).detach().cpu()
+
         return score, len(texts)
 
 
@@ -706,36 +704,35 @@ class ImageRewardScore(Metric):
             dim=0,
         )
 
-        with torch.amp.autocast(device_type="cuda"):
-            # text encode
-            text_input = model.tokenizer(
-                texts,
-                padding="max_length",
-                truncation=True,
-                max_length=35,
-                return_tensors="pt",
-            ).to(device)
+        # text encode
+        text_input = model.tokenizer(
+            texts,
+            padding="max_length",
+            truncation=True,
+            max_length=35,
+            return_tensors="pt",
+        ).to(device)
 
-            # image encode
-            image_embeds = model.visual_encoder(images)
+        # image encode
+        image_embeds = model.visual_encoder(images)
 
-            # text encode cross attention with image
-            image_atts = torch.ones(image_embeds.size()[:-1], dtype=torch.long).to(
-                device
-            )
-            text_output = model.text_encoder(
-                text_input.input_ids,
-                attention_mask=text_input.attention_mask,
-                encoder_hidden_states=image_embeds,
-                encoder_attention_mask=image_atts,
-                return_dict=True,
-            )
+        # text encode cross attention with image
+        image_atts = torch.ones(image_embeds.size()[:-1], dtype=torch.long).to(
+            device
+        )
+        text_output = model.text_encoder(
+            text_input.input_ids,
+            attention_mask=text_input.attention_mask,
+            encoder_hidden_states=image_embeds,
+            encoder_attention_mask=image_atts,
+            return_dict=True,
+        )
 
-            txt_features = text_output.last_hidden_state[
-                :, 0, :
-            ].float()  # (feature_dim)
-            score = self.mlp(txt_features)
-            score = (score - self.mean) / self.std
+        txt_features = text_output.last_hidden_state[
+            :, 0, :
+        ].float()  # (feature_dim)
+        score = self.mlp(txt_features)
+        score = (score - self.mean) / self.std
 
         return score.detach().cpu(), len(texts)
     
