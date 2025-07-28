@@ -1,0 +1,25 @@
+[project]
+name = "diffevals"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "hpsv2",
+    "huggingface-hub>=0.34.2",
+    "image-reward>=1.5",
+    "numpy>=2.3.2",
+    "open-clip-torch>=2.32.0",
+    "prdc>=0.2",
+    "scipy>=1.16.1",
+    "timm>=0.6.13",
+    "torch>=2.7.1",
+    "torchaudio>=2.7.1",
+    "torchmetrics[image]>=1.8.0",
+    "torchvision>=0.22.1",
+    "tqdm>=4.67.1",
+    "transformers>=4.54.0",
+]
+
+[tool.uv.sources]
+hpsv2 = { git = "https://github.com/tgxs002/HPSv2.git" }
