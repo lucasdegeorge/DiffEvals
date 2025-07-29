@@ -15,7 +15,7 @@ def main():
     ## Load a dataset ##
     ## Here we assume that that images are generated and stored in a directory ##
     dataset = GenDataset(
-        image_path="/data/ag/artifacts/neurips2025/partiprompts_images/llava_256/parti_long",
+        image_path="/data/ag/artifacts/neurips2025/partiprompts_images/cutmix_512/parti_long",
         caption_path="/data/ag/artifacts/neurips2025/partiprompts_images/partiprompts.txt",
     )
 
