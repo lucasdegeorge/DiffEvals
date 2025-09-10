@@ -130,6 +130,7 @@ class GenDataset(Dataset):
                     2, 0, 1
                 )
                 for file in sorted(glob(f"{image_path}/*.png"))
+                + sorted(glob(f"{image_path}/*.jpg"))
             ]
 
             self.images = torch.stack(self.images, dim=0)

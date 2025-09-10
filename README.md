@@ -1,11 +1,11 @@
 # DiffEvals
 
 ## TODO
-[x] Implement HPSv2, PickScore, Aesthetic Score.
-[x] Implement Image-reward.
-[x] Fix the installation procedure.
-[ ] Implement GenEval.
-[ ] Cleanup with separate files for aesthetic scores.
+- [x] Implement HPSv2, PickScore, Aesthetic Score.
+- [x] Implement Image-reward.
+- [x] Fix the installation procedure.
+- [ ] Implement GenEval.
+- [ ] Cleanup with separate files for aesthetic scores.
 
 ## Installation
 

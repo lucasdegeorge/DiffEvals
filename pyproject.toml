@@ -24,3 +24,11 @@ dependencies = [
 [tool.uv.sources]
 hpsv2 = { git = "https://github.com/tgxs002/HPSv2.git" }
 image-reward = { git = "https://github.com/zai-org/ImageReward.git" }
+
+[build-system]
+requires = ["uv_build"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = "src"
+module-name = "genmetrics"
