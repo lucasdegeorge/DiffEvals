@@ -7,6 +7,7 @@ import os
 from PIL import Image
 from glob import glob
 from prdc import compute_prdc
+import json
 
 
 ## Defining the calculation functions ##
@@ -104,6 +105,29 @@ def calculate_prdc(real_features, fake_features, k, prdc_splits=5):
 
     return np.mean(precision), np.mean(recall), np.mean(density), np.mean(coverage)
 
+
+def open_txt_file(path: str):
+    """Open a txt file and return the contents."""
+
+    with open(path, "r") as fp:
+        contents = fp.read().splitlines()
+        return contents
+
+
+def open_jsonl_file(path: str):
+    """Open a json file and return the contents."""
+
+    with open(path, "r") as fp:
+        contents = [json.loads(line) for line in fp]
+        return contents
+
+
+def open_json_file(path: str):
+    """Open a json file and return the contents."""
+
+    with open(path, "r") as fp:
+        contents = json.load(fp)
+        return contents
 
 ## Making dataset ##
 class GenDataset(Dataset):
