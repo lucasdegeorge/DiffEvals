@@ -109,45 +109,84 @@ def calculate_prdc(real_features, fake_features, k, prdc_splits=5):
 class GenDataset(Dataset):
     """Implements the dataset."""
 
-    def __init__(self, image_path, caption_path=None):
+    def __init__(self, image_path=None, ref_caption_path=None, gen_caption_path=None):
         super().__init__()
+
+        assert (image_path is not None) or (
+            ref_caption_path is not None
+        ), "Need at least one of image_path or ref_caption_path."
+
+        self.image_path = image_path
+        self.ref_caption_path = ref_caption_path
+        self.gen_caption_path = (
+            gen_caption_path if gen_caption_path is not None else ref_caption_path
+        )
         self.mean = torch.tensor([False], dtype=torch.bool)
         self.sigma = torch.tensor([False], dtype=torch.bool)
 
-        ## Getting the data ##
-        if ".npz" in image_path:
-            with np.load(image_path) as file:
-                self.images = torch.from_numpy(file["arr_0"]).permute(0, 3, 1, 2)
-                try:
-                    self.mean = torch.from_numpy(file["mu"])
-                    self.sigma = torch.from_numpy(file["sigma"])
-                except KeyError:
-                    pass
+        ## Getting the images if image path is provided ##
+        if image_path is not None:
+            if ".npz" in image_path:
+                with np.load(image_path) as file:
+                    self.images = torch.from_numpy(file["arr_0"]).permute(0, 3, 1, 2)
+                    try:
+                        self.mean = torch.from_numpy(file["mu"])
+                        self.sigma = torch.from_numpy(file["sigma"])
+                    except KeyError:
+                        pass
 
-        elif os.path.isdir(image_path):
-            self.images = [
-                torch.from_numpy(np.array(Image.open(file).convert("RGB"))).permute(
-                    2, 0, 1
-                )
-                for file in sorted(glob(f"{image_path}/*.png"))
-                + sorted(glob(f"{image_path}/*.jpg"))
+            elif os.path.isdir(image_path):
+                self.images = [
+                    torch.from_numpy(np.array(Image.open(file).convert("RGB"))).permute(
+                        2, 0, 1
+                    )
+                    for file in sorted(glob(f"{image_path}/*.png"))
+                    + sorted(glob(f"{image_path}/*.jpg"))
+                ]
+
+                self.images = torch.stack(self.images, dim=0)
+
+            else:
+                raise ValueError("Invalid image path.")
+
+        if ref_caption_path is not None:
+            ## Getting the reference captions ##
+            self.ref_captions = self._get_captions(ref_caption_path)
+            self.gen_captions = self._get_captions(gen_caption_path)
+
+    def _get_captions(self, path):
+        """Helper function to get captions from a file."""
+        if path.endswith(".txt"):
+            all_contents = open_txt_file(path)
+            captions = [caption.lstrip('b"').rstrip('"') for caption in all_contents]
+            return captions
+        elif path.endswith(".jsonl"):
+            all_contents = open_jsonl_file(path)
+            captions = [
+                content["prompt"].lstrip('b"').rstrip('"') for content in all_contents
             ]
-
-            self.images = torch.stack(self.images, dim=0)
-
+            return captions
+        elif path.endswith(".json"):
+            all_contents = open_json_file(path)
+            captions = all_contents["captions"]
+            return captions
         else:
-            raise ValueError("Invalid path.")
-
-        self.captions = None
-        if caption_path is not None:
-            assert ".txt" in caption_path, "Invalid caption path. Need a .txt file."
-            with open(caption_path, "r") as file:
-                self.captions = file.read().splitlines()
+            raise ValueError("Unsupported caption file format.")
 
     def __getitem__(self, idx):
-        if self.captions is not None:
-            return self.images[idx], self.captions[idx], self.mean, self.sigma
-        return self.images[idx], self.mean, self.sigma
+        batch = {
+            "mean": self.mean,
+            "sigma": self.sigma,
+        }
+        if self.image_path is not None:
+            batch.update({"image": self.images[idx]})
+        if self.ref_caption_path is not None:
+            batch.update({"ref_caption": self.ref_captions[idx]})
+        if self.gen_caption_path is not None:
+            batch.update({"gen_caption": self.gen_captions[idx]})
+        return batch
 
     def __len__(self):
-        return len(self.images)
+        return (
+            len(self.images) if self.image_path is not None else len(self.ref_captions)
+        )
