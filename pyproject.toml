@@ -21,9 +21,6 @@ dependencies = [
     "transformers>=4.54.0",
 ]
 
-[tool.uv]
-extra-build-dependencies = { "image-reward" = ["setuptools<71"], "clip" = ["setuptools<71"] }
-
 [tool.uv.sources]
 hpsv2 = { git = "https://github.com/tgxs002/HPSv2.git" }
 image-reward = { git = "https://github.com/zai-org/ImageReward.git" }
