@@ -129,11 +129,19 @@ def open_json_file(path: str):
         contents = json.load(fp)
         return contents
 
+
 ## Making dataset ##
 class GenDataset(Dataset):
     """Implements the dataset."""
 
-    def __init__(self, image_path=None, ref_caption_path=None, gen_caption_path=None):
+    def __init__(
+        self,
+        image_path=None,
+        ref_caption_path=None,
+        gen_caption_path=None,
+        return_no_images=False,
+        dataset_size=None,
+    ):
         super().__init__()
 
         assert (image_path is not None) or (
@@ -147,36 +155,53 @@ class GenDataset(Dataset):
         )
         self.mean = torch.tensor([False], dtype=torch.bool)
         self.sigma = torch.tensor([False], dtype=torch.bool)
+        self.images = None
+        assert (
+            dataset_size is not None or not return_no_images
+        ), "dataset_size must be provided if return_no_images is True."
+        self.return_no_images = return_no_images
+        self.dataset_size = dataset_size
 
         ## Getting the images if image path is provided ##
         if image_path is not None:
             if ".npz" in image_path:
-                with np.load(image_path) as file:
-                    self.images = torch.from_numpy(file["arr_0"]).permute(0, 3, 1, 2)
-                    try:
-                        self.mean = torch.from_numpy(file["mu"])
-                        self.sigma = torch.from_numpy(file["sigma"])
-                    except KeyError:
-                        pass
+                try:
+                    file = np.load(image_path)
+                except ValueError:
+                    file = np.load(image_path, allow_pickle=True)
+                # with np.load(image_path) as file:
+                if not self.return_no_images:
+                    self.images = torch.from_numpy(file["arr_0"]).permute(
+                        0, 3, 1, 2
+                    )
+                try:
+                    self.mean = torch.from_numpy(file["mu"])
+                    self.sigma = torch.from_numpy(file["sigma"])
+                except KeyError:
+                    pass
 
             elif os.path.isdir(image_path):
-                self.images = [
-                    torch.from_numpy(np.array(Image.open(file).convert("RGB"))).permute(
-                        2, 0, 1
-                    )
-                    for file in sorted(glob(f"{image_path}/*.png"))
-                    + sorted(glob(f"{image_path}/*.jpg"))
-                ]
+                if not self.return_no_images:
+                    self.images = [
+                        torch.from_numpy(
+                            np.array(Image.open(file).convert("RGB"))
+                        ).permute(2, 0, 1)
+                        for file in sorted(glob(f"{image_path}/*.png"))
+                        + sorted(glob(f"{image_path}/*.jpg"))
+                        + sorted(glob(f"{image_path}/*.jpeg"))
+                        + sorted(glob(f"{image_path}/*.JPEG"))
+                        + sorted(glob(f"{image_path}/*.PNG"))
+                    ]
 
                 self.images = torch.stack(self.images, dim=0)
 
             else:
                 raise ValueError("Invalid image path.")
 
-        if ref_caption_path is not None:
+        if self.ref_caption_path is not None:
             ## Getting the reference captions ##
-            self.ref_captions = self._get_captions(ref_caption_path)
-            self.gen_captions = self._get_captions(gen_caption_path)
+            self.ref_captions = self._get_captions(self.ref_caption_path)
+            self.gen_captions = self._get_captions(self.gen_caption_path)
 
     def _get_captions(self, path):
         """Helper function to get captions from a file."""
@@ -202,7 +227,7 @@ class GenDataset(Dataset):
             "mean": self.mean,
             "sigma": self.sigma,
         }
-        if self.image_path is not None:
+        if self.image_path is not None and self.images is not None:
             batch.update({"image": self.images[idx]})
         if self.ref_caption_path is not None:
             batch.update({"ref_caption": self.ref_captions[idx]})
@@ -211,6 +236,8 @@ class GenDataset(Dataset):
         return batch
 
     def __len__(self):
+        if self.return_no_images:
+            return self.dataset_size
         return (
             len(self.images) if self.image_path is not None else len(self.ref_captions)
         )

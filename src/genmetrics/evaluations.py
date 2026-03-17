@@ -47,7 +47,9 @@ class GenMetric(Metric):
     def __init__(
         self,
         metrics: List[str] = [
-            "inception",
+            "inception_fid",
+            "inception_is",
+            "inception_prdc",
             "clip",
             "jina_clip",
             "pickscore",
@@ -73,7 +75,9 @@ class GenMetric(Metric):
         assert all(
             metric
             in [
-                "inception",
+                "inception_fid",
+                "inception_is",
+                "inception_prdc",
                 "clip",
                 "jina_clip",
                 "pickscore",
@@ -84,17 +88,17 @@ class GenMetric(Metric):
             for metric in metrics
         ), f"Sorry, one of the requested metric is not implemented!"
 
-        if "inception" in metrics:
+        ## Setting the attributes ##
+        self.metrics = metrics
+
+        if any("inception" in metric for metric in self.metrics):
             assert (
                 feature_extractors_for_inception_metrics is not None
             ), "Feature extractors for inception metrics must be provided."
 
-        ## Setting the attributes ##
-        self.metrics = metrics
-
         ## Setting up the metric subclasses ##
         ## 1. Inception Metrics ##
-        if "inception" in metrics:
+        if any("inception" in metric for metric in self.metrics):
             feature_extractors_dict = {}
             for name in feature_extractors_for_inception_metrics:
                 if name == "inceptionv3":
@@ -111,9 +115,16 @@ class GenMetric(Metric):
 
             feature_extractors = nn.ModuleDict(feature_extractors_dict)
 
+            which_scores = []
+            if "inception_fid" in self.metrics:
+                which_scores.append("fid")
+            if "inception_is" in self.metrics:
+                which_scores.append("is")
+            if "inception_prdc" in self.metrics:
+                which_scores.append("prdc")
             self.inception_metrics = InceptionMetric(
                 features=feature_extractors,
-                which_scores=["fid", "is", "prdc"],
+                which_scores=which_scores,
             )
 
         ## 2. CLIPScore ##
@@ -149,7 +160,13 @@ class GenMetric(Metric):
     ):
         """Updates the states of the metrics."""
 
-        if "inception" in self.metrics:
+        assert (
+            images is not None
+            or (mean.dtype != torch.bool and sigma.dtype != torch.bool)
+            or captions is not None
+        ), "At least one of images, mean/sigma or captions must be provided for the update."
+
+        if any("inception" in metric for metric in self.metrics):
             self.inception_metrics.update(images, mean=mean, sigma=sigma, real=real)
 
         if "clip" in self.metrics:
@@ -180,7 +197,9 @@ class GenMetric(Metric):
 
         if "image_reward_score" in self.metrics:
             if real == False:
-                assert captions is not None, "Captions must be provided for ImageRewardScore."
+                assert (
+                    captions is not None
+                ), "Captions must be provided for ImageRewardScore."
                 self.image_reward_score_metrics.update(images, captions)
 
     def compute(self):
@@ -188,7 +207,7 @@ class GenMetric(Metric):
         eval_scores = {}
 
         print("Computing the evaluation metrics...")
-        if "inception" in self.metrics:
+        if any("inception" in metric for metric in self.metrics):
             print("Computing the inception metrics...")
             eval_scores.update(self.inception_metrics.compute())
 
@@ -297,6 +316,10 @@ class InceptionMetric(Metric):
 
         # ## Extracting the features ##
         for name in self.feature_extractor_names:
+            assert (
+                images is not None or "inception" in name
+            ), "Images must be provided for feature extractors other than inceptionv3."
+
             if "inception" in name:
                 ## Setting the mean and sigma ##
                 self.__setattr__(
@@ -308,21 +331,22 @@ class InceptionMetric(Metric):
                     sigma[0] if mean.dtype != torch.bool else None,
                 )
 
-            preds = self.feature_extractors[name](images)
+            if images is not None:
+                preds = self.feature_extractors[name](images)
 
-            if isinstance(preds, tuple):
-                self.__getattribute__(f"{prefix}_features_{name}").append(
-                    preds[0].detach().cpu()
-                )
-
-                if real == False:
-                    self.__getattribute__(f"{prefix}_logits_{name}").append(
-                        preds[1].detach().cpu()
+                if isinstance(preds, tuple):
+                    self.__getattribute__(f"{prefix}_features_{name}").append(
+                        preds[0].detach().cpu()
                     )
-            else:
-                self.__getattribute__(f"{prefix}_features_{name}").append(
-                    preds.detach().cpu()
-                )
+
+                    if real == False:
+                        self.__getattribute__(f"{prefix}_logits_{name}").append(
+                            preds[1].detach().cpu()
+                        )
+                else:
+                    self.__getattribute__(f"{prefix}_features_{name}").append(
+                        preds.detach().cpu()
+                    )
 
     def compute(self):
         """Computes the evaluation metrics."""
@@ -330,8 +354,15 @@ class InceptionMetric(Metric):
 
         ## Getting the features and doing dim zero cat ##
         for name in self.feature_extractor_names:
-            real_features = dim_zero_cat(self.__getattribute__(f"real_features_{name}"))
-            fake_features = dim_zero_cat(self.__getattribute__(f"fake_features_{name}"))
+            real_features, fake_features = None, None
+            if len(self.__getattribute__(f"real_features_{name}")) != 0:
+                real_features = dim_zero_cat(
+                    self.__getattribute__(f"real_features_{name}")
+                )
+            if len(self.__getattribute__(f"fake_features_{name}")) != 0:
+                fake_features = dim_zero_cat(
+                    self.__getattribute__(f"fake_features_{name}")
+                )
 
             if "fid" in self.which_scores:
                 print(f"Calculating FID for {name}...", end="")
@@ -350,6 +381,9 @@ class InceptionMetric(Metric):
                 print("Done!")
 
             if "is" in self.which_scores and "inception" in name:
+                assert (
+                    fake_features is not None and real_features is not None
+                ), "Features must be provided for IS calculation."
                 print(f"Calculating IS for {name}...", end="")
                 fake_logits = dim_zero_cat(self.__getattribute__(f"fake_logits_{name}"))
                 eval_scores[f"is_{name}"] = calculate_is(
@@ -358,6 +392,9 @@ class InceptionMetric(Metric):
                 print("Done!")
 
             if "prdc" in self.which_scores:
+                assert (
+                    fake_features is not None and real_features is not None
+                ), "Features must be provided for IS calculation."
                 print(f"Calculating PRDC for {name}. It is done in batches...")
                 precision, recall, density, coverage = calculate_prdc(
                     real_features=real_features,
@@ -497,7 +534,7 @@ class PickScore(Metric):
         txt_features = txt_features / txt_features.norm(p=2, dim=-1, keepdim=True)
 
         score = model.logit_scale.exp() * torch.diag(txt_features @ img_features.T)
-        
+
         return score, len(text)
 
 
@@ -717,9 +754,7 @@ class ImageRewardScore(Metric):
         image_embeds = model.visual_encoder(images)
 
         # text encode cross attention with image
-        image_atts = torch.ones(image_embeds.size()[:-1], dtype=torch.long).to(
-            device
-        )
+        image_atts = torch.ones(image_embeds.size()[:-1], dtype=torch.long).to(device)
         text_output = model.text_encoder(
             text_input.input_ids,
             attention_mask=text_input.attention_mask,
@@ -728,11 +763,8 @@ class ImageRewardScore(Metric):
             return_dict=True,
         )
 
-        txt_features = text_output.last_hidden_state[
-            :, 0, :
-        ].float()  # (feature_dim)
+        txt_features = text_output.last_hidden_state[:, 0, :].float()  # (feature_dim)
         score = self.mlp(txt_features)
         score = (score - self.mean) / self.std
 
         return score.detach().cpu(), len(texts)
-    

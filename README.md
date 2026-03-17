@@ -19,6 +19,8 @@ One other alternative (and the recommended one) is to use `uv` for installation.
 
 ## Usage
 
+### Simple Usage
+
 ```python
 from genmetrics import GenMetric
 
@@ -26,7 +28,8 @@ from genmetrics import GenMetric
 # and all of inception metrics. These include FID, IS, PRDC. There is also an ... #
 # opportunity to use different feature extractors for inception metrics calculation. ##
 gen_metrics = GenMetric(
-    metrics=["inception", "clip", "jina_clip"],
+    ## For inception metrics add inception_ prefix ##
+    metrics=["inception_fid", "inception_is" "clip", "jina_clip"], 
     feature_extractors_for_inception_metrics=["inceptionv3", "clip", "dinov2"],
 )
 gen_metrics = gen_metrics.to("cuda")
@@ -49,7 +52,7 @@ fake_loader = torch.utils.data.DataLoader(
 # ... as the real dataset and fake dataset might have different number of ... #
 # ... samples. In case you have same number of samples, please use one loop for both. ##
 for real_images in tqdm(real_loader, total=len(real_loader)):
-    gen_metrics.update(real_images.to("cuda"), real=True)
+    gen_metrics.update(images=real_images.to("cuda"), real=True)
 
 for fake_images in tqdm(fake_loader, total=len(fake_loader)):
     captions = ["abcd"] * fake_images.shape[0]
@@ -60,8 +63,12 @@ eval_scores = gen_metrics.compute()
 print(eval_scores)
 ```
 
+### `GenDataset` based usage
 
-One could also use the in-built `GenDataset` to create the dataset and calculate scores.
+#### 1. Usage where you have already prepared the datasets
+
+One could also use the in-built `GenDataset` to create the dataset and calculate scores. We can also have `GenDataset` with `.npz` file with no images inside them and only mean and std stats. 
+
 
 ```python
 from genmetrics import GenMetric, GenDataset
@@ -70,15 +77,24 @@ from genmetrics import GenMetric, GenDataset
 # ... These include FID, IS, PRDC. There is also an opportunity to use different ... #
 # ... feature extractors for inception metrics calculation. ##
 gen_metrics = GenMetric(
-    metrics=["clip", "inception"],
+    metrics=["inception_fid"],
     feature_extractors_for_inception_metrics=["inceptionv3", "clip", "dinov2"],
 )
 gen_metrics = gen_metrics.to("cuda")
 
 ## Setting the real and fake dataset ##
-real_dataset = GenDataset(image_path="real/img/folder/or/npz", caption_path=None)
+## 
+real_dataset = GenDataset(
+    image_path="real/img/folder/or/npz", 
+    ## This suggests no images are there in the npz file! (only for inception_fid)
+    return_no_images=True, 
+    dataset_size=50000
+) # the image_path can also be a folder!
 
-fake_dataset = GenDataset(image_path="fake/img/folder/or/npz", caption_path="caption/path/txt")
+fake_dataset = GenDataset(
+    image_path="fake/img/folder/or/npz", 
+    ref_caption_path="/ref/caption/path/txt"
+) # the image_path can also be a folder!
 
 real_loader = torch.utils.data.DataLoader(
     real_dataset, batch_size=32, shuffle=False
@@ -90,21 +106,21 @@ fake_loader = torch.utils.data.DataLoader(
 ## Looping over the real loader and fake loader separately. This is done ... #
 # ... as the real dataset and fake dataset might have different number of ... #
 # ... samples. In case you have same number of samples, please use one loop for both. ##
-for real_images, real_mean, real_sigma in tqdm(real_loader, total=len(real_loader)):
+for batch in tqdm(real_loader, total=len(real_loader)):
     gen_metrics.update(
-        real_images.to("cuda"),
-        mean=real_mean.to("cuda"), 
-        sigma=real_sigma.to("cuda"),
+        images=batch.get("image", None),
+        mean=batch["mean"], 
+        sigma=batch["sigma"],
         real=True
     )
 
-for fake_images, captions, fake_mean, fake_sigma in tqdm(fake_loader, total=len(fake_loader)):
+for batch in tqdm(fake_loader, total=len(fake_loader)):
     gen_metrics.update(
-        fake_images.to("cuda"), 
-        mean=fake_mean.to("cuda"), 
-        sigma=fake_sigma.to("cuda"), 
+        images=batch.get("image", None), # Typically shouldn't be None! 
+        mean=batch["mean"], 
+        sigma=batch["sigma"],
         real=False, 
-        captions=list(captions)
+        captions=batch["ref_captions"]
     )
 
 eval_scores = gen_metrics.compute()
@@ -113,6 +129,27 @@ print(eval_scores)
 
 ```
 
+#### 2. Usage where you have already prepared real dataset but generate the fake dataset.
+```python
+## ... same code as before ... ##
+fake_dataset = GenDataset(
+    image_path=None, 
+    ref_caption_path="/ref/caption/path/txt",
+    gen_caption_path="/gen/caption/path/txt",
+) # the image_path can also be a folder!
+
+## ... code from before ... ##
+for batch in tqdm(fake_loader):
+    generated_images = GenerationModel(caption=batch["gen_caption"], ...)
+    gen_metrics.update(
+        images=generated_images,
+        mean=batch["mean"], 
+        sigma=batch["sigma"],
+        real=False, 
+        captions=batch["ref_captions"]
+    )
+
+```
 
 One could also just use the `InceptionMetric` and `CLIPJinaScore` separately by doing the following.
 ```python
